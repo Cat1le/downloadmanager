@@ -1,6 +1,7 @@
 use std::{
     path::PathBuf,
-    sync::mpsc::{self, Receiver, Sender}, time::Duration,
+    sync::mpsc::{self, Receiver, Sender},
+    time::Duration,
 };
 
 use eframe::egui::{CentralPanel, ProgressBar, TextEdit, Window};
@@ -107,6 +108,7 @@ impl eframe::App for App {
                                     self.send
                                         .send(SendMessage::QueueNew {
                                             url: self.add_download_text.clone(),
+                                            location: self.location.clone(),
                                         })
                                         .unwrap();
                                     self.add_download_show = false;
