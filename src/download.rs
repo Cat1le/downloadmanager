@@ -2,11 +2,10 @@ use std::{
     collections::HashMap,
     fs::{self, File},
     io::{BufRead, BufReader, Read, Write},
-    net::{TcpListener, TcpStream, ToSocketAddrs},
+    net::{TcpStream, ToSocketAddrs},
     path::PathBuf,
     sync::mpsc::{self, Receiver, Sender},
     thread,
-    time::Duration,
 };
 
 use dns_lookup::lookup_host;
@@ -120,6 +119,15 @@ fn worker(
             };
             file.write(buf).unwrap();
             let len = buf.len();
+            if len == 0 {
+                sender
+                    .send(RecvMessage::ProgressUpdated {
+                        name: name.clone(),
+                        new_progress: 1.,
+                    })
+                    .unwrap();
+                return;
+            }
             written += len;
             if let Some(total) = content_length {
                 sender

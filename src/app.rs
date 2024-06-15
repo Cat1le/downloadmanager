@@ -1,7 +1,6 @@
 use std::{
     path::PathBuf,
     sync::mpsc::{self, Receiver, Sender},
-    time::Duration,
 };
 
 use eframe::egui::{CentralPanel, ProgressBar, TextEdit, Window};
