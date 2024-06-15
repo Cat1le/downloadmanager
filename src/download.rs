@@ -126,18 +126,22 @@ fn worker(
                         new_progress: 1.,
                     })
                     .unwrap();
-                return;
+                break;
             }
             written += len;
             if let Some(total) = content_length {
                 sender
                     .send(RecvMessage::ProgressUpdated {
                         name: name.clone(),
-                        new_progress: (total as f32) / (written as f32),
+                        new_progress: (written as f32) / (total as f32),
                     })
                     .unwrap();
             }
             reader.consume(len);
+        }
+        if matches!(r.recv(), Ok(ToWorkerMessage::Delete)) {
+            fs::remove_file(location.join(&file_location)).unwrap();
+            return;
         }
     });
     s
@@ -175,7 +179,7 @@ fn get_unused_filename(location: PathBuf, base: String) -> String {
     for i in 0.. {
         let prev = &base[..dot];
         let next = &base[dot + 1..];
-        let base = format!("{prev} ({i}){next}");
+        let base = format!("{prev} ({i}).{next}");
         let path = location.join(&base);
         if !path.exists() {
             return base;
