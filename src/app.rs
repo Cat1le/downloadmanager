@@ -1,10 +1,12 @@
 use std::{
     path::PathBuf,
     sync::mpsc::{self, Receiver, Sender},
-    thread,
+    time::Duration,
 };
 
 use eframe::egui::{CentralPanel, ProgressBar, TextEdit, Window};
+use notify_rust::Notification;
+use url::Url;
 
 use crate::download::{self, RecvMessage, SendMessage};
 
@@ -51,6 +53,7 @@ impl eframe::App for App {
                 // }
             });
             ui.separator();
+            let mut to_delete = None;
             for download in &self.downloads {
                 ui.horizontal(|ui| {
                     ui.add(
@@ -71,8 +74,19 @@ impl eframe::App for App {
                                 name: download.name.clone(),
                             })
                             .unwrap();
+                        let mut index = 0;
+                        for (idx, item) in self.downloads.iter().enumerate() {
+                            if item.name == download.name {
+                                index = idx;
+                                break;
+                            }
+                        }
+                        to_delete = Some(index);
                     }
                 });
+            }
+            if let Some(index) = to_delete {
+                self.downloads.remove(index);
             }
             if !self.downloads.is_empty() {
                 ui.separator();
@@ -87,15 +101,18 @@ impl eframe::App for App {
                             TextEdit::singleline(&mut self.add_download_text)
                                 .hint_text("http://example.com/file.txt"),
                         );
+                        ui.add_space(10.);
                         ui.horizontal(|ui| {
-                            if ui.button("Apply").clicked() {
-                                self.send
-                                    .send(SendMessage::QueueNew {
-                                        url: self.add_download_text.clone(),
-                                    })
-                                    .unwrap();
-                                self.add_download_show = false;
-                                self.add_download_text.clear();
+                            if Url::parse(&self.add_download_text).is_ok() {
+                                if ui.button("Apply").clicked() {
+                                    self.send
+                                        .send(SendMessage::QueueNew {
+                                            url: self.add_download_text.clone(),
+                                        })
+                                        .unwrap();
+                                    self.add_download_show = false;
+                                    self.add_download_text.clear();
+                                }
                             }
                             if ui.button("Close").clicked() {
                                 self.add_download_show = false;
@@ -109,6 +126,13 @@ impl eframe::App for App {
                 match msg {
                     RecvMessage::AddNew { name } => {
                         self.downloads.push(DownloadInfo { progress: 0., name })
+                    }
+                    RecvMessage::AddNewFail { url, reason } => {
+                        Notification::new()
+                            .summary("Download Manager")
+                            .body(&format!("{url} failed: {reason}"))
+                            .show()
+                            .unwrap();
                     }
                     RecvMessage::ProgressUpdated { name, new_progress } => {
                         self.downloads
