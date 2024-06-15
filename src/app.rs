@@ -1,7 +1,6 @@
 use std::{
     path::PathBuf,
-    sync::mpsc::{self, Receiver, Sender},
-    time::Duration,
+    sync::mpsc::{self, Receiver, Sender}, time::Duration,
 };
 
 use eframe::egui::{CentralPanel, ProgressBar, TextEdit, Window};
@@ -127,10 +126,10 @@ impl eframe::App for App {
                     RecvMessage::AddNew { name } => {
                         self.downloads.push(DownloadInfo { progress: 0., name })
                     }
-                    RecvMessage::AddNewFail { url, reason } => {
+                    RecvMessage::AddNewFail { name, reason } => {
                         Notification::new()
                             .summary("Download Manager")
-                            .body(&format!("{url} failed: {reason}"))
+                            .body(&format!("{name} failed because {reason}"))
                             .show()
                             .unwrap();
                     }
@@ -139,7 +138,7 @@ impl eframe::App for App {
                             .iter_mut()
                             .find(|x| x.name == name)
                             .unwrap()
-                            .progress = new_progress
+                            .progress = new_progress;
                     }
                 }
             }
