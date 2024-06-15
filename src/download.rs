@@ -9,6 +9,7 @@ use std::{
 };
 
 use dns_lookup::lookup_host;
+use openssl::ssl::{SslConnector, SslMethod};
 use url::Url;
 
 pub enum RecvMessage {
@@ -46,6 +47,10 @@ pub fn start(sender: Sender<RecvMessage>, receiver: Receiver<SendMessage>) {
     });
 }
 
+trait RW: Read + Write {}
+
+impl<T: Read + Write> RW for T {}
+
 fn worker(
     url: String,
     name: String,
@@ -58,7 +63,7 @@ fn worker(
             .send(RecvMessage::AddNew { name: name.clone() })
             .unwrap();
         let url = Url::parse(&url).unwrap();
-        let Ok(mut stream) = TcpStream::connect(get_ip(url.host_str().unwrap())) else {
+        let Ok(stream) = TcpStream::connect(get_ip(&url)) else {
             sender
                 .send(RecvMessage::AddNewFail {
                     name,
@@ -66,6 +71,12 @@ fn worker(
                 })
                 .unwrap();
             return;
+        };
+        let mut stream: Box<dyn RW> = if url.scheme() == "http" {
+            Box::new(stream)
+        } else {
+            let connector = SslConnector::builder(SslMethod::tls()).unwrap().build();
+            Box::new(connector.connect(url.host_str().unwrap(), stream).unwrap())
         };
         let Ok(_) = stream.write(b"GET /path HTTP/1.0\r\n\r\n") else {
             sender
@@ -147,8 +158,18 @@ fn worker(
     s
 }
 
-fn get_ip(host: &str) -> impl ToSocketAddrs {
-    (*lookup_host(host).unwrap().first().unwrap(), 80u16)
+fn get_ip(url: &Url) -> impl ToSocketAddrs {
+    (
+        *lookup_host(url.host_str().unwrap())
+            .unwrap()
+            .first()
+            .unwrap(),
+        if url.scheme() == "http" {
+            80u16
+        } else {
+            443u16
+        },
+    )
 }
 
 fn get_headers<R: Read>(stream: R) -> HashMap<String, String> {
