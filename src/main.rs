@@ -13,11 +13,12 @@ use std::{
 use eframe::{
     egui::{
         ahash::{HashMap, HashMapExt},
-        CentralPanel, Context, ProgressBar, TextEdit, ViewportBuilder,
+        CentralPanel, Color32, Context, ProgressBar, TextEdit, ViewportBuilder,
     },
     NativeOptions,
 };
 use tokio::sync::Mutex;
+use url::Url;
 
 fn main() {
     eframe::run_native(
@@ -31,6 +32,7 @@ fn main() {
     .unwrap()
 }
 
+#[derive(Clone)]
 struct Download {
     name: String,
     progress: f32,
@@ -40,7 +42,7 @@ impl Download {
     fn new(url: String) -> Self {
         Self {
             progress: 0.,
-            name: url[url.rfind('/').unwrap() + 1..].to_string()
+            name: url[url.rfind('/').unwrap() + 1..].to_string(),
         }
     }
 }
@@ -106,7 +108,7 @@ impl eframe::App for App {
                     ui.add(
                         ProgressBar::new(download.progress)
                             .desired_height(10.)
-                            .desired_width(100.),
+                            .desired_width(200.),
                     );
                     ui.label(&download.name);
                     if download.progress == 1. {
@@ -132,8 +134,14 @@ impl eframe::App for App {
             }
             ui.separator();
             ui.horizontal(|ui| {
-                ui.add(TextEdit::singleline(&mut self.new_download_url).hint_text("http://example.com/file.txt"));
-                if ui.button("Add").clicked() {
+                let is_url_valid = Url::parse(&self.new_download_url).is_ok();
+                let mut text_edit = TextEdit::singleline(&mut self.new_download_url)
+                    .hint_text("http://example.com/file.txt");
+                if !is_url_valid {
+                    text_edit = text_edit.text_color(Color32::RED);
+                }
+                ui.add(text_edit);
+                if is_url_valid && ui.button("Add").clicked() {
                     let location = self.location.clone().unwrap();
                     let download = Download::new(self.new_download_url.clone());
                     let download_id = downloads.keys().max().cloned().map(|x| x + 1).unwrap_or(0);
@@ -141,7 +149,6 @@ impl eframe::App for App {
                     self.new_download_url.clear();
                     let download_name = download.name.clone();
                     downloads.insert(download_id, download);
-                    // drop(downloads);
                     let downloads_ref = Arc::clone(&self.downloads);
                     let context_ref = Arc::clone(&self.context);
                     self.runtime.spawn(async move {
