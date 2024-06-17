@@ -1,4 +1,14 @@
-use std::{fs::{self, File}, hash::Hash, io::Write, path::PathBuf, sync::Arc};
+#![cfg_attr(
+    all(not(debug_assertions), target_os = "windows"),
+    windows_subsystem = "windows"
+)]
+
+use std::{
+    fs::{self, File},
+    io::Write,
+    path::PathBuf,
+    sync::Arc,
+};
 
 use eframe::{
     egui::{
@@ -13,7 +23,7 @@ fn main() {
     eframe::run_native(
         "Download manager",
         NativeOptions {
-            viewport: ViewportBuilder::default(),
+            viewport: ViewportBuilder::default().with_inner_size((640., 480.)),
             ..Default::default()
         },
         Box::new(|ctx| Box::new(App::new(&ctx.egui_ctx))),
@@ -22,7 +32,6 @@ fn main() {
 }
 
 struct Download {
-    url: String,
     name: String,
     progress: f32,
 }
@@ -31,16 +40,8 @@ impl Download {
     fn new(url: String) -> Self {
         Self {
             progress: 0.,
-            name: url[url.rfind('/').unwrap() + 1..].to_string(),
-            url,
+            name: url[url.rfind('/').unwrap() + 1..].to_string()
         }
-    }
-}
-
-impl Hash for Download {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.url.hash(state);
-        self.name.hash(state);
     }
 }
 
@@ -131,15 +132,16 @@ impl eframe::App for App {
             }
             ui.separator();
             ui.horizontal(|ui| {
-                ui.add(TextEdit::singleline(&mut self.new_download_url).hint_text(""));
+                ui.add(TextEdit::singleline(&mut self.new_download_url).hint_text("http://example.com/file.txt"));
                 if ui.button("Add").clicked() {
                     let location = self.location.clone().unwrap();
                     let download = Download::new(self.new_download_url.clone());
-                    let download_id = downloads.keys().max().cloned().unwrap_or(0);
+                    let download_id = downloads.keys().max().cloned().map(|x| x + 1).unwrap_or(0);
                     let download_url = self.new_download_url.clone();
+                    self.new_download_url.clear();
                     let download_name = download.name.clone();
                     downloads.insert(download_id, download);
-                    drop(downloads);
+                    // drop(downloads);
                     let downloads_ref = Arc::clone(&self.downloads);
                     let context_ref = Arc::clone(&self.context);
                     self.runtime.spawn(async move {
