@@ -22,7 +22,7 @@ use url::Url;
 
 fn main() {
     eframe::run_native(
-        "Download manager",
+        "Download Manager",
         NativeOptions {
             viewport: ViewportBuilder::default().with_inner_size((640., 480.)),
             ..Default::default()
@@ -39,10 +39,10 @@ struct Download {
 }
 
 impl Download {
-    fn new(url: String) -> Self {
+    fn new(url: &Url) -> Self {
         Self {
             progress: 0.,
-            name: url[url.rfind('/').unwrap() + 1..].to_string(),
+            name: url.path()[url.path().rfind('/').unwrap() + 1..].to_string(),
         }
     }
 }
@@ -100,6 +100,7 @@ impl eframe::App for App {
             if self.location.is_none() {
                 return;
             }
+            let location = self.location.clone().unwrap();
             ui.separator();
             let mut downloads = self.downloads.blocking_lock();
             let mut to_delete = None;
@@ -113,9 +114,7 @@ impl eframe::App for App {
                     ui.label(&download.name);
                     if download.progress == 1. {
                         if ui.button("Open").clicked() {
-                            drop(open::that(
-                                self.location.as_ref().unwrap().join(&download.name),
-                            ));
+                            let _ = open::that(location.join(&download.name));
                         }
                         if ui.button("Delete").clicked() {
                             to_delete = Some(id.clone());
@@ -124,36 +123,31 @@ impl eframe::App for App {
                 });
             }
             if let Some(id) = to_delete {
-                let path = self
-                    .location
-                    .as_ref()
-                    .unwrap()
-                    .join(&downloads.iter().find(|x| x.0 == &id).unwrap().1.name);
+                let path = location.join(&downloads.iter().find(|x| x.0 == &id).unwrap().1.name);
                 fs::remove_file(path).unwrap();
                 downloads.remove(&id);
             }
             ui.separator();
             ui.horizontal(|ui| {
-                let is_url_valid = Url::parse(&self.new_download_url).is_ok();
+                let url = Url::parse(&self.new_download_url);
                 let mut text_edit = TextEdit::singleline(&mut self.new_download_url)
                     .hint_text("http://example.com/file.txt");
-                if !is_url_valid {
+                if url.is_err() {
                     text_edit = text_edit.text_color(Color32::RED);
                 }
                 ui.add(text_edit);
-                if is_url_valid && ui.button("Add").clicked() {
-                    let location = self.location.clone().unwrap();
-                    let download = Download::new(self.new_download_url.clone());
-                    let download_id = downloads.keys().max().cloned().map(|x| x + 1).unwrap_or(0);
-                    let download_url = self.new_download_url.clone();
+                if url.is_ok() && ui.button("Add").clicked() {
                     self.new_download_url.clear();
+                    let url = url.unwrap();
+                    let download = Download::new(&url);
+                    let download_id = downloads.keys().max().cloned().map(|x| x + 1).unwrap_or(0);
                     let download_name = download.name.clone();
                     downloads.insert(download_id, download);
                     let downloads_ref = Arc::clone(&self.downloads);
                     let context_ref = Arc::clone(&self.context);
                     self.runtime.spawn(async move {
                         let mut file = File::create(location.join(download_name)).unwrap();
-                        let mut resp = reqwest::get(download_url).await.unwrap();
+                        let mut resp = reqwest::get(url.as_str()).await.unwrap();
                         let total = resp.content_length().unwrap();
                         let mut current = 0;
                         while let Ok(Some(chunk)) = resp.chunk().await {
