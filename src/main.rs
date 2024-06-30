@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, sync::Arc, thread};
 
 use downloader::Command;
 use eframe::{
@@ -25,6 +25,7 @@ fn main() {
     .unwrap();
 }
 
+#[derive(Clone)]
 pub struct Progress {
     pub value: f32,
     pub failed: bool,
@@ -34,6 +35,7 @@ pub struct Download {
     pub id: usize,
     pub progress: Vec<Progress>,
     pub name: String,
+    pub ready: bool,
 }
 
 struct AddDownloadDialog {
@@ -48,6 +50,14 @@ struct AppState {
     add_download_dialog: Option<AddDownloadDialog>,
 }
 
+impl AppState {
+    fn next_id(&mut self) -> usize {
+        let id = self.last_id;
+        self.last_id += 1;
+        id
+    }
+}
+
 struct App {
     #[allow(dead_code)] // Runtime must not be dropped to keep futures running
     runtime: Arc<Runtime>,
@@ -56,7 +66,7 @@ struct App {
 }
 
 impl App {
-    fn new(_context: &Context) -> Self {
+    fn new(context: &Context) -> Self {
         let runtime = Arc::new(Runtime::new().unwrap());
         let state = Arc::new(Mutex::new(AppState {
             last_id: 0,
@@ -65,22 +75,33 @@ impl App {
             add_download_dialog: None,
         }));
         Self {
-            sender: downloader::start(runtime.clone(), state.clone()),
+            sender: downloader::start(runtime.clone(), state.clone(), context.clone()),
             runtime,
             state,
         }
     }
 
-    fn enqueue(&mut self, url: String, name: String) {
-        self.sender.send(Command::Enqueue { url, name }).unwrap();
-    }
-
-    fn delete(&mut self, id: usize) {
-        self.sender.send(Command::Delete { id }).unwrap();
-    }
-
-    fn restart(&mut self, id: usize) {
-        self.sender.send(Command::Restart { id }).unwrap();
+     fn enqueue(&mut self, url: String, name: String) {
+        let mut state = self.state.blocking_lock();
+        let id = state.next_id();
+        state.downloads.insert(
+            id,
+            Download {
+                id,
+                progress: vec![
+                    Progress {
+                        failed: false,
+                        value: 0.
+                    };
+                    thread::available_parallelism().unwrap().get()
+                ],
+                name: name.clone(),
+                ready: false,
+            },
+        );
+        self.sender
+            .send(Command::Enqueue { id, url, name })
+            .unwrap();
     }
 }
 
@@ -88,8 +109,6 @@ impl eframe::App for App {
     fn update(&mut self, ctx: &eframe::egui::Context, _frame: &mut eframe::Frame) {
         let state_arc = self.state.clone();
         let mut state = state_arc.blocking_lock();
-        let mut to_delete = None;
-        let mut to_restart = None;
         SidePanel::left("left panel")
             .exact_width(200.)
             .show_separator_line(true)
@@ -101,7 +120,7 @@ impl eframe::App for App {
                     )
                     .clicked()
                 {
-                    self.state.blocking_lock().add_download_dialog = Some(AddDownloadDialog {
+                    state.add_download_dialog = Some(AddDownloadDialog {
                         url: "".into(),
                         filename: "".into(),
                     });
@@ -152,14 +171,6 @@ impl eframe::App for App {
                         if ui.button(&download.name).clicked() {
                             set_download_sel = Some(download_id);
                         }
-                        if download.progress.iter().any(|x| x.failed) {
-                            if ui.button("R").clicked() {
-                                to_restart = Some(download_id);
-                            }
-                        }
-                        if ui.button("D").clicked() {
-                            to_delete = Some(download_id);
-                        }
                     });
                     ui.add(ManyProgressBar::new(vec2(0., 7.), &ranges));
                     ui.add_space(10.);
@@ -181,23 +192,7 @@ impl eframe::App for App {
                     ui.add(bar);
                 }
                 ui.separator();
-                ui.horizontal(|ui| {
-                    if download.progress.iter().any(|x| x.failed) {
-                        if ui.button("Restart failed workers").clicked() {
-                            to_restart = state.download_sel;
-                        }
-                    }
-                    if ui.button("Delete").clicked() {
-                        to_delete = state.download_sel;
-                    }
-                });
             }
         });
-        if let Some(to_remove) = to_delete {
-            self.delete(to_remove)
-        }
-        if let Some(to_restart) = to_restart {
-            self.restart(to_restart);
-        }
     }
 }

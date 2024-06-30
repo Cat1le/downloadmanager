@@ -1,8 +1,8 @@
-use core::time;
 use std::{sync::Arc, thread};
 
 use reqwest::{Client, Url};
 use tokio::{
+    fs::File,
     runtime::Runtime,
     sync::mpsc::{unbounded_channel, UnboundedSender},
 };
@@ -17,7 +17,7 @@ macro_rules! or_fail_global {
                 $sender.send(Response::FailedGlobal {
                     id: $id,
                     reason: format!("{e}"),
-                });
+                }).unwrap();
                 return;
             }
         }
@@ -38,19 +38,15 @@ macro_rules! or_fail_global {
 }
 
 pub struct EntryData {
-    id: usize,
-    url: Url,
-    runtime: Arc<Runtime>,
-    client: Client,
+    pub id: usize,
+    pub url: String,
+    pub name: String,
+    pub runtime: Arc<Runtime>,
+    pub client: Client,
 }
 
 pub struct EntryId {
-    entry_id: usize,
-}
-
-pub enum Command {
-    Restart { worker_index: usize },
-    Delete,
+    pub entry_id: usize,
 }
 
 pub enum Response {
@@ -66,20 +62,22 @@ pub fn start(
     EntryData {
         id,
         url,
+        name,
         runtime,
         client,
     }: EntryData,
-) -> UnboundedSender<Command> {
-    let (cmd_sender, cmd_receiver) = unbounded_channel();
-    let (sx, rx) = unbounded_channel();
+) {
+    let url = or_fail_global!(Url::parse(&url), sender, EntryId { entry_id: id });
+    let (sx, mut rx) = unbounded_channel();
+    let sender_ref = sender.clone();
     let runtime_ref = runtime.clone();
     let par = thread::available_parallelism().unwrap().get();
     runtime.spawn(async move {
         let id = EntryId { entry_id: id };
-        let resp = or_fail_global!(client.head(url.clone()).send().await, sender, id);
+        let resp = or_fail_global!(client.head(url.clone()).send().await, sender_ref, id);
         let content_length = or_fail_global!(
             resp.content_length().ok_or("No Content-Length header"),
-            sender,
+            sender_ref,
             id
         ) as usize;
         let mut workers = Vec::new();
@@ -96,39 +94,50 @@ pub fn start(
                     },
                     url: url.clone(),
                     range,
-                    runtime: runtime_ref,
+                    runtime: runtime_ref.clone(),
                     client: client.clone(),
                 },
             ));
         }
     });
     runtime.spawn(async move {
-        let mut done_count = 0;
+        let mut done = Vec::with_capacity(par);
         while let Some(resp) = rx.recv().await {
             match resp {
                 worker::Response::MadeProgress { id, value } => {
-                    sender.send(Response::MadeProgress { id, value });
+                    sender.send(Response::MadeProgress { id, value }).unwrap();
                 }
-                worker::Response::Succeed { id } => {
-                    sender.send(Response::Succeed { id });
-                    done_count += 1;
-                    if done_count == par {
-                        sender.send(Response::SucceedGlobal {
-                            id: EntryId {
-                                entry_id: id.entry_id,
-                            },
+                worker::Response::Succeed { id, filepath } => {
+                    sender.send(Response::Succeed { id: id.clone() }).unwrap();
+                    done.push(filepath);
+                    if done.len() == par {
+                        let mut file = File::create(name.clone()).await.unwrap();
+                        done.sort_by_key(|x| {
+                            let fname = x.file_name().unwrap().to_str().unwrap();
+                            fname.split('-').nth(2).unwrap().parse::<usize>().unwrap()
                         });
+                        for d in done {
+                            let mut d_file = tokio::fs::File::open(d).await.unwrap();
+                            tokio::io::copy(&mut d_file, &mut file).await.unwrap();
+                        }
+                        sender
+                            .send(Response::SucceedGlobal {
+                                id: EntryId {
+                                    entry_id: id.entry_id,
+                                },
+                            })
+                            .unwrap();
+                        break;
                     }
                 }
                 worker::Response::Failed { id, reason } => {
-                    sender.send(Response::Failed { id, reason });
+                    sender.send(Response::Failed { id, reason }).unwrap();
                 }
             }
         }
     });
-    cmd_sender
 }
 
-fn calculate_ranges(total: usize, par: usize) -> Vec<(usize, usize)> {
+fn calculate_ranges(_total: usize, _par: usize) -> Vec<(usize, usize)> {
     todo!()
 }
