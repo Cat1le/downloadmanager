@@ -78,7 +78,9 @@ pub fn start(
         let id = EntryId { entry_id: id };
         let resp = or_fail_global!(client.get(url.clone()).send().await, sender_ref, id);
         let content_length = or_fail_global!(
-            resp.content_length().filter(|&x| x != 0).ok_or("No Content-Length header"),
+            resp.content_length()
+                .filter(|&x| x != 0)
+                .ok_or("No Content-Length header"),
             sender_ref,
             id
         ) as usize;
@@ -142,23 +144,20 @@ pub fn start(
     });
 }
 
-fn min(a: usize, b: usize) -> usize {
-    if a > b {
-        b
-    } else {
-        a
-    }
-}
-
 fn calculate_ranges(mut total: usize, par: usize) -> Vec<(usize, usize)> {
     let mut v = Vec::new();
-    let mut start = 0;
-    let mut item = total / par;
-    while total > 0 {
-        item = min(total, item);
-        v.push((start, start + item - 1));
-        start += item;
-        total -= item;
+    if total % par == 0 {
+        let item = total / par;
+        for i in 0..par {
+            v.push((item * i, item * i + item - 1));
+        }
+    } else {
+        let item = total / (par - 1);
+        for i in 0..(par - 1) {
+            v.push((item * i, item * i + item - 1));
+            total -= item;
+        }
+        v.push((item * (par - 1), item * (par - 1) + total - 1));
     }
     v
 }

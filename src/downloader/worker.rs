@@ -1,12 +1,12 @@
-use std::{
-    env::current_dir,
-    fs::{self},
-    path::PathBuf,
-    sync::Arc,
-};
+use std::{env::current_dir, path::PathBuf, sync::Arc};
 
 use reqwest::{header::HeaderValue, Client, Method, Request, Url};
-use tokio::{fs::File, io::AsyncWriteExt, runtime::Runtime, sync::mpsc::UnboundedSender};
+use tokio::{
+    fs::{self, File},
+    io::AsyncWriteExt,
+    runtime::Runtime,
+    sync::mpsc::UnboundedSender,
+};
 
 macro_rules! or_fail {
     ($expr:expr, $sender:expr, $id:expr) => {
@@ -40,7 +40,7 @@ macro_rules! or_fail {
     };
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct WorkerId {
     pub entry_id: usize,
     pub worker_index: usize,
@@ -73,7 +73,7 @@ pub fn start(
     let mut req = Request::new(Method::GET, url);
     req.headers_mut().insert(
         "Range",
-        HeaderValue::from_str(&format!("{}-{}", range.0, range.1)).unwrap(),
+        HeaderValue::from_str(&format!("bytes={}-{}", range.0, range.1)).unwrap(),
     );
     runtime.spawn(async move {
         let filepath = file_name(&id);
