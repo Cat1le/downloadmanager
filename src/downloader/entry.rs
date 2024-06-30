@@ -2,7 +2,7 @@ use std::{sync::Arc, thread};
 
 use reqwest::{Client, Url};
 use tokio::{
-    fs::File,
+    fs::{self, File},
     runtime::Runtime,
     sync::mpsc::{unbounded_channel, UnboundedSender},
 };
@@ -14,10 +14,12 @@ macro_rules! or_fail_global {
         match $expr {
             Ok(x) => x,
             Err(e) => {
-                $sender.send(Response::FailedGlobal {
-                    id: $id,
-                    reason: format!("{e}"),
-                }).unwrap();
+                $sender
+                    .send(Response::FailedGlobal {
+                        id: $id,
+                        reason: format!("{e}"),
+                    })
+                    .unwrap();
                 return;
             }
         }
@@ -74,12 +76,13 @@ pub fn start(
     let par = thread::available_parallelism().unwrap().get();
     runtime.spawn(async move {
         let id = EntryId { entry_id: id };
-        let resp = or_fail_global!(client.head(url.clone()).send().await, sender_ref, id);
+        let resp = or_fail_global!(client.get(url.clone()).send().await, sender_ref, id);
         let content_length = or_fail_global!(
-            resp.content_length().ok_or("No Content-Length header"),
+            resp.content_length().filter(|&x| x != 0).ok_or("No Content-Length header"),
             sender_ref,
             id
         ) as usize;
+        drop(resp);
         let mut workers = Vec::new();
         for (idx, range) in calculate_ranges(content_length, par)
             .into_iter()
@@ -117,8 +120,9 @@ pub fn start(
                             fname.split('-').nth(2).unwrap().parse::<usize>().unwrap()
                         });
                         for d in done {
-                            let mut d_file = tokio::fs::File::open(d).await.unwrap();
+                            let mut d_file = tokio::fs::File::open(&d).await.unwrap();
                             tokio::io::copy(&mut d_file, &mut file).await.unwrap();
+                            fs::remove_file(d).await.unwrap();
                         }
                         sender
                             .send(Response::SucceedGlobal {
@@ -138,6 +142,23 @@ pub fn start(
     });
 }
 
-fn calculate_ranges(_total: usize, _par: usize) -> Vec<(usize, usize)> {
-    todo!()
+fn min(a: usize, b: usize) -> usize {
+    if a > b {
+        b
+    } else {
+        a
+    }
+}
+
+fn calculate_ranges(mut total: usize, par: usize) -> Vec<(usize, usize)> {
+    let mut v = Vec::new();
+    let mut start = 0;
+    let mut item = total / par;
+    while total > 0 {
+        item = min(total, item);
+        v.push((start, start + item - 1));
+        start += item;
+        total -= item;
+    }
+    v
 }

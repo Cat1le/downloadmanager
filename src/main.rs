@@ -9,7 +9,7 @@ use eframe::{
 };
 use tokio::{
     runtime::Runtime,
-    sync::{mpsc::UnboundedSender, Mutex},
+    sync::{mpsc::UnboundedSender, Mutex, MutexGuard},
 };
 use widget::ManyProgressBar;
 
@@ -81,8 +81,7 @@ impl App {
         }
     }
 
-     fn enqueue(&mut self, url: String, name: String) {
-        let mut state = self.state.blocking_lock();
+    fn enqueue(&mut self, url: String, name: String, state: &mut MutexGuard<AppState>) {
         let id = state.next_id();
         state.downloads.insert(
             id,
@@ -149,7 +148,7 @@ impl eframe::App for App {
                 if enqueue {
                     let AddDownloadDialog { url, filename } =
                         state.add_download_dialog.take().unwrap();
-                    self.enqueue(url, filename);
+                    self.enqueue(url, filename, &mut state);
                 }
                 if close_add_download {
                     state.add_download_dialog = None;
