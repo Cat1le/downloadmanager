@@ -78,7 +78,7 @@ fn worker(
             let connector = SslConnector::builder(SslMethod::tls()).unwrap().build();
             Box::new(connector.connect(url.host_str().unwrap(), stream).unwrap())
         };
-        let Ok(_) = stream.write(b"GET /path HTTP/1.0\r\n\r\n") else {
+        let Ok(_) = stream.write(format!("GET {} HTTP/1.0\r\n\r\n", url.path()).as_bytes()) else {
             sender
                 .send(RecvMessage::AddNewFail {
                     name,
